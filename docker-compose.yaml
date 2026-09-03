@@ -1,0 +1,117 @@
+# ==============================================================================
+# Chatwoot Community Edition - Docker Compose Stack (Portainer & Production Ready)
+# Official Images: chatwoot/chatwoot:latest | pgvector:pg16 | redis:alpine
+# ==============================================================================
+
+services:
+  base: &base
+    image: chatwoot/chatwoot:latest
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - storage_data:/app/storage
+    networks:
+      - chatwoot_net
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - RAILS_ENV=${RAILS_ENV:-production}
+      - INSTALLATION_ENV=${INSTALLATION_ENV:-docker}
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE}
+      - ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY=${ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY}
+      - ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY=${ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY}
+      - ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT=${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3200}
+      - DEFAULT_LOCALE=${DEFAULT_LOCALE:-es}
+      - FORCE_SSL=${FORCE_SSL:-false}
+      - ENABLE_ACCOUNT_SIGNUP=${ENABLE_ACCOUNT_SIGNUP:-true}
+      - POSTGRES_HOST=${POSTGRES_HOST:-postgres}
+      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_DATABASE=${POSTGRES_DATABASE:-chatwoot_production}
+      - POSTGRES_USERNAME=${POSTGRES_USERNAME:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - RAILS_MAX_THREADS=${RAILS_MAX_THREADS:-5}
+      - RAILS_LOG_TO_STDOUT=${RAILS_LOG_TO_STDOUT:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - SIDEKIQ_CONCURRENCY=${SIDEKIQ_CONCURRENCY:-10}
+      - ACTIVE_STORAGE_SERVICE=${ACTIVE_STORAGE_SERVICE:-local}
+
+  rails:
+    <<: *base
+    container_name: chatwoot_rails
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${CHATWOOT_PORT:-3200}:3000"
+    entrypoint: docker/entrypoints/rails.sh
+    command: ['sh', '-c', 'bundle exec rails db:chatwoot_prepare && bundle exec rails s -p 3000 -b 0.0.0.0']
+    restart: always
+
+  sidekiq:
+    <<: *base
+    container_name: chatwoot_sidekiq
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
+    restart: always
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: chatwoot_postgres
+    restart: always
+    environment:
+      - POSTGRES_DB=chatwoot_production
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d chatwoot_production"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - chatwoot_net
+
+  redis:
+    image: redis:alpine
+    container_name: chatwoot_redis
+    restart: always
+    command: ["sh", "-c", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-server --requirepass \"$$REDIS_PASSWORD\"; else redis-server; fi"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -a \"$$REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - chatwoot_net
+
+volumes:
+  storage_data:
+    name: chatwoot_storage_data
+  postgres_data:
+    name: chatwoot_postgres_data
+  redis_data:
+    name: chatwoot_redis_data
+
+networks:
+  chatwoot_net:
+    name: chatwoot_network
+    driver: bridge

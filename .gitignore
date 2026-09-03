@@ -1,0 +1,19 @@
+# Environment secrets (NEVER COMMIT)
+.env
+.env.*
+!.env.example
+
+# Backups and database dumps
+backups/
+*.sql
+*.dump
+*.tar.gz
+*.zip
+
+# Logs
+*.log
+logs/
+
+# Operating system files
+.DS_Store
+Thumbs.db
